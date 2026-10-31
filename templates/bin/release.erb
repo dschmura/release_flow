@@ -1,0 +1,9 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Walks a release from <%= config.integration_branch %> to <%= config.production_branch %>: <%= config.guide %>
+root = File.expand_path("..", __dir__)
+require "bundler/setup" if File.exist?(File.join(root, "Gemfile"))
+require "release_flow"
+
+exit ReleaseFlow::CLI.start(ARGV, root: root)
