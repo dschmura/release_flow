@@ -21,7 +21,7 @@ your branch ──merge──▶ next ──cut──▶ release/<name> ──sh
 - **One release at a time**, with a GitHub Release and tag for each.
 
 It runs on `git` and the [GitHub CLI](https://cli.github.com) (`gh`), and
-has no dependencies beyond Ruby 3.2. Rails isn't required.
+has no dependencies beyond Ruby 3.3. Rails isn't required.
 
 ## Install
 

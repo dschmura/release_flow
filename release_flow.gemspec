@@ -14,7 +14,7 @@ Gem::Specification.new do |spec|
                      "as exactly the commit staging ran, tagged with its notes."
   spec.homepage = "https://github.com/dschmura/release_flow"
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 3.2.0"
+  spec.required_ruby_version = ">= 3.3.0"
 
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
