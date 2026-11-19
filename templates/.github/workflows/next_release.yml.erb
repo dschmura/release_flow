@@ -4,7 +4,7 @@ name: Next release
 on:
   pull_request:
     types: [ closed ]
-    branches: [ <%= config.integration_branch %> ]
+    branches: [ <%= config.integration_branch %>, <%= config.production_branch %> ]
   # Safe: cut acts only on a push to <%= config.integration_branch %>, checks it out by name, and reads only the run's event and result.
   workflow_run: # jactionlint ignore=dangerous-triggers
     workflows: [ <%= ci_name %> ]
@@ -20,6 +20,7 @@ jobs:
       vars.AUTO_RELEASE == 'true' &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.merged &&
+      github.event.pull_request.base.ref == '<%= config.integration_branch %>' &&
       github.event.pull_request.head.repo.full_name == github.repository
     concurrency:
       group: next-release-prepare
@@ -96,3 +97,48 @@ jobs:
         run: |
           gh auth setup-git
           bin/release cut --if-needed
+
+  # A release PR merged with GitHub's button skips ship's publish and merge-back; this finishes them.
+  ship:
+    if: >-
+      vars.AUTO_RELEASE == 'true' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged &&
+      github.event.pull_request.base.ref == '<%= config.production_branch %>' &&
+      startsWith(github.event.pull_request.head.ref, 'release/') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    concurrency:
+      group: next-release-ship
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require the release token
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error title=RELEASE_TOKEN isn't set::AUTO_RELEASE is on, but this repository has no RELEASE_TOKEN secret, so the merged release can't be published. Add one as <%= config.guide %> says under \"Set up the release token\", or set AUTO_RELEASE to false."
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: <%= config.production_branch %>
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0
+        with:
+          bundler-cache: true
+
+      - name: Publish the release and merge it back
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh auth setup-git
+          bin/release ship "$PR" "$HEAD_SHA"

@@ -104,7 +104,8 @@ entry in `changelog.d/`. Then run `bin/release merge-back`.
 With the workflow switched on, a release is named whenever a PR merges into
 `next` and none is under way, and cut once CI passes there. If CI fails
 where it would cut, the run fails and says so. Shipping stays a person's
-call.
+call: run `bin/release ship`, or merge the release PR on GitHub, and the
+workflow publishes `v<name>` and merges `main` back into `next`.
 
 ### Set up the release token
 
