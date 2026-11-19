@@ -10,6 +10,9 @@ your branch ──merge──▶ next ──cut──▶ release/<name> ──sh
                          └──────────────── merge-back ───────────────┘
 ```
 
+The [release map](docs/release_map.html) draws the same flow as a book being
+written, bound and published. Download it and open it in a browser.
+
 - **Changelog entries never conflict.** Each PR adds its entry as a file of
   its own in `changelog.d/`. A release gathers them into `CHANGELOG.md`.
 - **A release is exactly what its notes say.** `cut` takes the integration
