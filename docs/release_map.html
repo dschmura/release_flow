@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Release Map</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Caveat:wght@500;600&display=swap">
+<style>
+  /* Layout: a top-to-bottom story in four scenes (draft, pile, book, published) with a merge-back rail running up the left */
+  :root {
+    color-scheme: light;
+    --bg: #fbfbf9; --fg: #1f2328; --muted: #4a5058; --rule: #dcdfe3; --frame: #ffffff;
+    --paper: #fffdf7; --paper-line: #b9b2a2; --ink: #1f2328; --faint: #d8d2c4;
+    --sticky: #f8e38c; --sticky-ink: #3b3210;
+    --card: #ffffff; --card-rule: #b8cbe6; --card-margin: #e2a0a0;
+    --kraft: #e3cfae; --kraft-ink: #3a2a12;
+    --typed: #f4f1ea;
+    --pink: #f6c9d2; --pink-ink: #4a1d27;
+    --graph: #f1f7f0; --graph-line: #cfe2cc;
+    --check: #2f7a46;
+    --stamp: #a3341f;
+    --next: #2b5fa8; --next-tint: #eaf1fc;
+    --rel: #8a5a12; --rel-tint: #fbf1dd;
+    --main: #2f7a46; --main-tint: #e4f3e8;
+    --draft: #6a4a9c; --draft-tint: #f1ecf8;
+    --display: "Source Serif 4", Georgia, serif;
+    --body: "IBM Plex Sans", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    --hand: "Caveat", "Comic Sans MS", cursive;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg: #16181c; --fg: #e6e8eb; --muted: #b4bac2; --rule: #343a42; --frame: #1c1f24;
+    --paper: #2b2e33; --paper-line: #5d6570; --ink: #e6e8eb; --faint: #474c54;
+    --sticky: #5c4f1d; --sticky-ink: #fbefc0;
+    --card: #2f3238; --card-rule: #3e5576; --card-margin: #7a4646;
+    --kraft: #4d3d26; --kraft-ink: #f1e2c8;
+    --typed: #33352f; --stamp: #f08a72;
+    --pink: #5a2e38; --pink-ink: #fbdde3; --graph: #26302a; --graph-line: #36493a; --check: #7fcf98;
+    --next: #8db4f0; --next-tint: #1d2b42;
+    --rel: #e2b25e; --rel-tint: #3a2c14;
+    --main: #7fcf98; --main-tint: #173323; --draft: #c4abf0; --draft-tint: #2a2340; color-scheme: dark } }
+  :root[data-theme="dark"] {
+    --bg: #16181c; --fg: #e6e8eb; --muted: #b4bac2; --rule: #343a42; --frame: #1c1f24;
+    --paper: #2b2e33; --paper-line: #5d6570; --ink: #e6e8eb; --faint: #474c54;
+    --sticky: #5c4f1d; --sticky-ink: #fbefc0;
+    --card: #2f3238; --card-rule: #3e5576; --card-margin: #7a4646;
+    --kraft: #4d3d26; --kraft-ink: #f1e2c8;
+    --typed: #33352f; --stamp: #f08a72;
+    --pink: #5a2e38; --pink-ink: #fbdde3; --graph: #26302a; --graph-line: #36493a; --check: #7fcf98;
+    --next: #8db4f0; --next-tint: #1d2b42;
+    --rel: #e2b25e; --rel-tint: #3a2c14;
+    --main: #7fcf98; --main-tint: #173323; --draft: #c4abf0; --draft-tint: #2a2340; color-scheme: dark }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 56px; }
+  main { max-width: 58rem; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
+  h1 { font: 600 1.9rem/1.2 var(--display); margin: 0; text-wrap: balance; }
+  p { margin: 0; max-width: 68ch; color: var(--muted); }
+  code { font-family: var(--mono); font-size: .86em; }
+
+  .story { display: grid; grid-template-columns: 2.4rem 1fr; background: var(--frame); border: 1px solid var(--rule); border-radius: 10px; padding: .8rem .8rem .8rem .3rem; }
+  .story > .s-proof, .story > .step.first { grid-column: 2; }
+  .story > .rail { grid-column: 1; grid-row: 3; } .story > .scenes { grid-column: 2; grid-row: 3; }
+  .rail { position: relative; display: flex; justify-content: center; }
+  .rail::before { content: ""; position: absolute; top: 1.4rem; bottom: 3rem; left: 50%; border-left: 2px dashed var(--next); }
+  .rail::after { content: ""; position: absolute; top: .9rem; left: calc(50% - 6px); border: 7px solid transparent; border-bottom: 9px solid var(--next); border-top: 0; }
+  .rail span { position: sticky; top: 40%; align-self: center; writing-mode: vertical-rl; transform: rotate(180deg); background: var(--frame); padding: .4rem 0; font-size: .75rem; color: var(--muted); z-index: 1; }
+  .scenes { display: flex; flex-direction: column; min-width: 0; }
+
+  .scene { display: grid; grid-template-columns: 12.5rem 1fr; gap: 1rem; border-radius: 10px; padding: 1rem; align-items: center; }
+  .s-proof { background: var(--draft-tint); }
+  .s-next { background: var(--next-tint); }
+  .s-rel { background: var(--rel-tint); }
+  .s-main { background: var(--main-tint); }
+  .cap { display: flex; flex-direction: column; gap: .35rem; }
+  .cap h2 { margin: 0; font: 600 1.25rem/1.15 var(--display); }
+  .cap .branch { font: 600 .82rem var(--mono); }
+  .s-proof .branch { color: var(--draft); } .s-next .branch { color: var(--next); } .s-rel .branch { color: var(--rel); } .s-main .branch { color: var(--main); }
+  .cap p { font-size: .85rem; }
+  .cap .deploys { font-size: .8rem; font-weight: 600; color: var(--fg); }
+  .art { position: relative; min-width: 0; }
+
+  .step { display: flex; align-items: center; gap: .6rem; padding: .55rem 0 .55rem 13.5rem; font-size: .85rem; color: var(--muted); }
+  .step b { font-size: 1.3rem; color: var(--fg); line-height: 1; }
+  .step code { color: var(--fg); font-weight: 600; }
+  .step.note { padding-block: 0 .55rem; font-size: .8rem; font-style: italic; }
+
+  /* Scene 0: the proof */
+  .proof-art { height: 20rem; }
+  .board { position: absolute; left: 4%; top: 1.1rem; width: min(18rem, 54%); background: var(--kraft); border-radius: 10px; padding: 1.4rem .75rem .8rem;
+           box-shadow: 0 3px 6px rgb(0 0 0 / .22); transform: rotate(-1.5deg); }
+  .clip { position: absolute; top: -.85rem; left: 50%; translate: -50% 0; width: 5.5rem; height: 1.7rem; border-radius: 6px 6px 3px 3px;
+          background: linear-gradient(#d3d6da, #8e939a); border: 1px solid #686d74; }
+  .galley { position: relative; background: var(--paper); color: var(--ink); border: 1px solid var(--paper-line); padding: .6rem .75rem .8rem; font-family: var(--display); }
+  .galley .no { display: block; font: .7rem var(--mono); opacity: .8; }
+  .galley h3 { margin: 0 0 .4rem; font: 600 1.05rem/1.2 var(--display); }
+  .galley ol { margin: 0 0 .5rem; padding-left: 1.2rem; font-size: .85rem; line-height: 1.7; }
+  .circled { border: 2px solid var(--stamp); border-radius: 50%; padding: .05rem .4rem; margin-left: -.4rem; }
+  .cap .qa { font: 600 .78rem var(--body); color: var(--draft); text-transform: uppercase; letter-spacing: .04em; }
+  .entry { margin: .2rem 4.6rem 0 0; padding-top: .35rem; border-top: 1px dashed var(--paper-line); font: .74rem/1.35 var(--body); }
+  .entry b { display: block; font: 600 .66rem var(--mono); color: var(--draft); }
+  .galley .ln { height: .4rem; background: var(--faint); margin: .45rem 0; border-radius: 2px; }
+  .galley-stamp { position: absolute; right: .5rem; bottom: .6rem; border: 2px solid var(--draft); color: var(--draft); font: 600 .72rem/1.1 var(--mono); letter-spacing: .08em;
+                  padding: .15rem .4rem; transform: rotate(-8deg); text-align: center; }
+  .galley-stamp small { display: block; font-size: .58rem; letter-spacing: 0; font-weight: 500; }
+  .mark { position: absolute; left: calc(4% + min(18rem, 54%) + .4rem); top: 5.4rem; max-width: 9rem; font: 600 1.15rem/1.05 var(--hand); color: var(--stamp); transform: rotate(-4deg); }
+  .mark::before { content: "⟵ "; }
+  .carries { position: absolute; right: 2%; top: 9.2rem; width: min(15rem, 34%); background: var(--paper); color: var(--ink); border: 1px solid var(--paper-line);
+          border-top: 10px solid var(--draft); border-radius: 4px; padding: .5rem .7rem .6rem; box-shadow: 0 2px 4px rgb(0 0 0 / .15); transform: rotate(1.2deg); z-index: 2; }
+  .carries strong { display: block; font: 600 .82rem var(--display); margin-bottom: .25rem; }
+  .carries ul { margin: 0; padding: 0; list-style: none; font-size: .76rem; line-height: 1.35; display: flex; flex-direction: column; gap: .3rem; }
+  .carries li { display: grid; grid-template-columns: 1rem 1fr; }
+  .carries li::before { content: "→"; color: var(--draft); font-weight: 600; }
+  .carries code { font-size: .72rem; }
+  .alone { position: absolute; right: 3%; bottom: 3%; max-width: 15rem; text-align: right; font: 600 1.15rem/1.05 var(--hand); color: var(--draft); transform: rotate(-3deg); }
+
+  /* Scene 1: the pile */
+  .desk { height: 21rem; }
+  .sheet { position: absolute; width: min(15.5rem, 46%); padding: .5rem .65rem .6rem; font-size: .9rem; line-height: 1.25; box-shadow: 0 2px 3px rgb(0 0 0 / .18); }
+  .sheet .no { display: block; font: .7rem var(--mono); opacity: .8; margin-bottom: .1rem; }
+  .pink   { left: 4%; top: 3%; width: min(10rem, 40%); background: var(--pink); color: var(--pink-ink); font: 600 1.25rem/1.05 var(--hand); transform: rotate(-3deg); z-index: 6; }
+  .graph  { left: 12%; top: 19%; width: min(15.5rem, 42%); background: var(--graph); color: var(--ink); font-family: var(--body); border: 1px solid var(--paper-line); transform: rotate(2deg); z-index: 5;
+            background-image: linear-gradient(var(--graph-line) 1px, transparent 1px), linear-gradient(90deg, var(--graph-line) 1px, transparent 1px); background-size: .6rem .6rem; }
+  .kraft  { left: 2%; top: 76%; background: var(--kraft); color: var(--kraft-ink); font-family: var(--display); transform: rotate(1.2deg); z-index: 1;
+            clip-path: polygon(0 0, 100% 4%, 99% 100%, 70% 95%, 40% 100%, 12% 94%, 0 100%); }
+  .card   { left: 7%; top: 59%; background: var(--card); color: var(--ink); font-family: var(--display); border: 1px solid var(--paper-line); padding-left: 1.6rem; transform: rotate(-1.8deg); z-index: 2;
+            background-image: linear-gradient(90deg, transparent 1.15rem, var(--card-margin) 1.15rem, var(--card-margin) calc(1.15rem + 1px), transparent calc(1.15rem + 1px)),
+                              repeating-linear-gradient(transparent 0 1rem, var(--card-rule) 1rem calc(1rem + 1px)); }
+  .sticky { left: 30%; top: 49%; width: min(9.5rem, 24%); background: var(--sticky); color: var(--sticky-ink); font: 600 1.25rem/1.05 var(--hand); transform: rotate(-5deg); z-index: 4; }
+  .typed  { left: 2%; top: 37%; background: var(--typed); color: var(--ink); font: .82rem/1.3 var(--mono); border: 1px solid var(--paper-line); transform: rotate(.8deg); z-index: 3; }
+  .desk .sheet::after { content: "✓ checked"; position: absolute; right: .45rem; top: .35rem; font: 600 .6rem/1.3 var(--mono); color: var(--next);
+            border: 1px solid var(--next); border-radius: 2px; padding: 0 .25rem; transform: rotate(-6deg); opacity: .85; }
+  .gate { position: absolute; right: 2%; top: 3%; width: min(14rem, 36%); z-index: 7; background: var(--paper); color: var(--ink); border: 1px solid var(--paper-line);
+          border-top: 10px solid var(--next); border-radius: 4px; padding: .5rem .7rem .6rem; box-shadow: 0 2px 4px rgb(0 0 0 / .15); transform: rotate(1deg); }
+  .gate strong { display: block; font: 600 .82rem var(--display); margin-bottom: .25rem; }
+  .gate ul { margin: 0; padding: 0; list-style: none; font-size: .76rem; line-height: 1.35; display: flex; flex-direction: column; gap: .25rem; }
+  .gate li { display: grid; grid-template-columns: 1rem 1fr; }
+  .gate li::before { content: "✓"; color: var(--check); font-weight: 600; }
+  .gate code { font-size: .72rem; }
+  .gate li.opt::before { content: "○"; color: var(--draft); }
+  .gate li.opt { font-style: italic; }
+  .gate .not { margin-top: .4rem; padding-top: .35rem; border-top: 1px dashed var(--paper-line); font: 600 1.05rem/1.05 var(--hand); color: var(--stamp); }
+  .count { position: absolute; right: 3%; bottom: 4%; font: 600 1.15rem var(--hand); color: var(--next); transform: rotate(-3deg); }
+
+  /* Scene 2: the book */
+  .book-wrap { position: relative; max-width: 36rem; margin: .4rem auto 2.6rem; }
+  .spread { position: relative; z-index: 2; display: grid; grid-template-columns: 1.15fr 1fr; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 4px;
+            box-shadow: 0 3px 0 -1px var(--paper), 0 3px 0 0 var(--paper-line), 0 6px 0 -1px var(--paper), 0 6px 0 0 var(--paper-line), 0 10px 10px -5px rgb(0 0 0 / .3);
+            background-image: linear-gradient(90deg, transparent 50%, rgb(0 0 0 / .05) 53.2%, rgb(0 0 0 / .12) 53.5%, rgb(0 0 0 / .05) 53.8%, transparent 57%); }
+  .page { padding: 1.2rem 1.2rem 1.6rem; display: flex; flex-direction: column; gap: .5rem; min-width: 0; min-height: 19rem; color: var(--ink); }
+  .folio { margin-top: auto; align-self: center; font: .7rem var(--mono); color: var(--muted); }
+  .running { font: .66rem var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+  .toc { margin: .6rem 0 0; padding: 0; list-style: none; font: .92rem/2 var(--display); }
+  .toc li { display: flex; gap: .45rem; align-items: center; white-space: nowrap; }
+  .toc li::after { content: ""; flex: 1; border-bottom: 1px dotted var(--faint); order: 3; min-width: .5rem; align-self: flex-end; margin-bottom: .55rem; }
+  .k { order: 1; flex: none; width: 1.25rem; height: 1.25rem; display: grid; place-items: center; border: 1px solid var(--paper-line); border-radius: 3px; font: 600 .68rem var(--mono); color: var(--ink); }
+  .toc .t { order: 2; }
+  .ok { order: 4; font: 600 1.2rem/1 var(--hand); color: var(--check); width: .9rem; }
+  .c-kraft { background: var(--kraft); color: var(--kraft-ink); } .c-card { background: var(--card); } .c-sticky { background: var(--sticky); color: var(--sticky-ink); }
+  .c-typed { background: var(--typed); } .c-graph { background: var(--graph); } .c-pink { background: var(--pink); color: var(--pink-ink); }
+  .chapter { font: 600 1rem/1.25 var(--display); }
+  .scrap { position: relative; display: block; width: 90%; align-self: center; margin: .5rem 0 .35rem; }
+  .tipped { display: block; background: var(--kraft); color: var(--kraft-ink); font: .88rem/1.25 var(--display); padding: .5rem .6rem .6rem; transform: rotate(-1.5deg); box-shadow: 0 1px 2px rgb(0 0 0 / .2);
+            clip-path: polygon(0 0, 100% 4%, 99% 100%, 70% 95%, 40% 100%, 12% 94%, 0 100%); }
+  .tipped .no { display: block; font: .68rem var(--mono); opacity: .8; }
+  .tape { position: absolute; width: 2.4rem; height: .75rem; background: rgb(255 255 255 / .55); border: 1px solid rgb(0 0 0 / .08); z-index: 1; }
+  .tape.l { top: -.3rem; left: -.7rem; transform: rotate(-28deg); }
+  .tape.r { top: -.35rem; right: -.7rem; transform: rotate(24deg); }
+  .lines { display: flex; flex-direction: column; gap: .4rem; margin-top: .3rem; }
+  .lines i { display: block; height: 2px; background: var(--faint); border-radius: 1px; }
+  .lines i:nth-child(2) { width: 84%; } .lines i:nth-child(4) { width: 92%; } .lines i:nth-child(6) { width: 55%; }
+  .tabs { position: absolute; right: -1.35rem; top: .9rem; display: flex; flex-direction: column; gap: .35rem; z-index: 1; }
+  .tabs span { width: 1.3rem; height: 1.7rem; border-radius: 0 4px 4px 0; border: 1px solid var(--paper-line); border-left: 0; display: grid; place-items: center; font: 600 .68rem var(--mono); color: var(--ink); }
+  .tabs span:nth-child(odd) { margin-left: .15rem; }
+  .stamp { position: absolute; z-index: 3; right: 1.2rem; bottom: 1rem; border: 3px double var(--stamp); color: var(--stamp); padding: .1rem .5rem; transform: rotate(-11deg);
+           font: 600 1.05rem/1.1 var(--mono); letter-spacing: .18em; text-align: center; opacity: .85; }
+  .stamp small { display: block; font-size: .6rem; letter-spacing: .12em; }
+  .proof-note { position: absolute; left: 1rem; bottom: -2rem; font: 600 1.15rem/1 var(--hand); color: var(--check); transform: rotate(-1.5deg); }
+
+  /* Scene 3: published, with the archive */
+  .print { position: relative; display: grid; grid-template-columns: auto 1fr; gap: 2.5rem; align-items: end; max-width: 36rem; margin: 0 auto; padding: 1.8rem 0 4.2rem; }
+  .stand { position: relative; padding-bottom: .9rem; }
+  .stand::after { content: ""; position: absolute; left: -.8rem; right: -.8rem; bottom: 0; height: .5rem; background: var(--main); border-radius: 2px; }
+  .cover { position: relative; width: 9.5rem; height: 12.5rem; background: var(--main); color: var(--frame); border-radius: 2px 7px 7px 2px; padding: 1rem .9rem; display: flex; flex-direction: column; gap: .3rem;
+           box-shadow: inset .55rem 0 0 rgb(0 0 0 / .18), 4px 5px 0 -1px var(--paper), 4px 5px 0 0 var(--paper-line), 0 8px 12px -4px rgb(0 0 0 / .35); transform: rotate(-2deg); }
+  .cover .kicker { font: 600 .62rem var(--mono); letter-spacing: .14em; text-transform: uppercase; opacity: .9; }
+  .cover .ed { font: 600 1.3rem/1.1 var(--display); }
+  .cover .sub { margin-top: auto; font: .72rem var(--mono); }
+  .ribbon { position: absolute; top: .9rem; right: -.55rem; background: var(--paper); color: var(--main); border: 1.5px solid var(--main); font: 600 .62rem var(--mono); letter-spacing: .12em; padding: .15rem .45rem; transform: rotate(4deg); }
+  .archive { position: relative; height: 10.5rem; }
+  .files { position: absolute; left: .6rem; right: .6rem; top: 0; display: flex; flex-direction: column; }
+  .file { height: 2.4rem; margin-top: -.75rem; background: var(--paper); color: var(--muted); border: 1px solid var(--paper-line); border-radius: 3px 3px 0 0; padding: .2rem .55rem; font: .74rem var(--mono); box-shadow: 0 -1px 2px rgb(0 0 0 / .08); }
+  .file:first-child { margin-top: 0; }
+  .file:nth-child(odd) { margin-left: 1.4rem; } .file:nth-child(even) { margin-right: 1.4rem; }
+  .box-front { position: absolute; left: 0; right: 0; bottom: 0; height: 5.2rem; background: var(--kraft); color: var(--kraft-ink); border-radius: 3px; padding: .7rem .8rem; box-shadow: 0 3px 6px rgb(0 0 0 / .2);
+               display: flex; flex-direction: column; justify-content: center; }
+  .box-front strong { font: 600 .9rem var(--display); letter-spacing: .04em; }
+  .box-front span { font: .78rem var(--body); }
+  .label { position: absolute; font: 600 1.15rem/1.05 var(--hand); }
+  .label.prod { left: .2rem; top: 0; color: var(--main); }
+  .label.back { left: 12.5rem; right: 0; bottom: 0; color: var(--stamp); transform: rotate(-1.5deg); }
+  .erratum { max-width: 36rem; margin: 1rem auto 0; background: var(--paper); color: var(--ink); border: 1px solid var(--paper-line);
+             border-left: 10px solid var(--main); border-radius: 4px; padding: .5rem .8rem .6rem; font-size: .8rem; line-height: 1.4; box-shadow: 0 2px 4px rgb(0 0 0 / .15); }
+  .erratum strong { display: block; font: 600 .82rem var(--display); margin-bottom: .15rem; }
+  .erratum code { font-size: .74rem; }
+
+  @media (max-width: 720px) {
+    .scene { grid-template-columns: 1fr; }
+    .step { padding-left: .5rem; }
+    .desk { height: auto; display: flex; flex-direction: column; gap: .3rem; }
+    .desk .sheet, .count { position: static; width: auto; }
+    .gate { position: static; width: auto; transform: none; }
+    .proof-art { height: auto; display: flex; flex-direction: column; gap: .8rem; }
+    .board, .mark, .carries, .alone { position: static; width: auto; max-width: none; transform: none; text-align: left; }
+    .mark::before { content: "↑ "; }
+    .label.prod, .label.back { position: static; display: block; margin-top: .4rem; }
+    .print { grid-template-columns: 1fr; gap: 1.6rem; padding: 0; }
+    .book-wrap { margin: .4rem 1.4rem 0 0; }
+    .spread { grid-template-columns: 1fr; background-image: none; }
+    .page { min-height: 0; }
+    .toc li { white-space: normal; }
+    .proof-note { position: static; display: block; margin-top: 1.1rem; }
+    .stand { justify-self: center; }
+  }
+</style>
+</head>
+<body>
+
+<main>
+  <h1>Release map, as a book</h1>
+  <p>Every PR is a story, and you read its draft before it merges. <code>next</code> is the pile of merged stories. A release binds them into a book, with the changelog as its contents page. Shipping publishes the copy that was proofread, and earlier versions stay in the archive. <code>next</code> and <code>main</code> are the default names; <code>.release_flow.yml</code> changes them.</p>
+
+  <div class="story">
+    <section class="scene s-proof">
+      <div class="cap">
+        <h2>The draft</h2>
+        <span class="branch">your PR branch</span>
+        <span class="qa">You test it</span>
+        <p>CI covers what specs can. Whether it feels right is yours to check, here, before the story sits next to everyone else's.</p>
+        <span class="deploys">The flow deploys nothing from here.</span>
+      </div>
+      <div class="art proof-art">
+        <div class="board">
+          <span class="clip" aria-hidden="true"></span>
+          <div class="galley">
+            <span class="no">#47</span>
+            <h3>Share a report by link</h3>
+            <ol>
+              <li>Open the report</li>
+              <li><span class="circled">Choose who sees it</span></li>
+              <li>Send the link</li>
+            </ol>
+            <div class="entry"><b>changelog.d/share.md</b> Reports can be shared by link.</div>
+            <span class="galley-stamp">DRAFT<small>this story only</small></span>
+          </div>
+        </div>
+        <span class="mark">sends with no one chosen?</span>
+        <div class="carries">
+          <strong>What the PR carries</strong>
+          <ul>
+            <li><span>The change, tested by you, aimed at <code>next</code></span></li>
+            <li><span>Its changelog entry, as a file of its own in <code>changelog.d/</code>, so two PRs never conflict</span></li>
+          </ul>
+        </div>
+        <span class="alone">fix it here, while it's still one story</span>
+      </div>
+    </section>
+
+    <div class="step first"><b>↓</b><span>merge the PR: the checks pass and the story joins the pile</span></div>
+
+    <div class="rail" aria-hidden="true"><span>merge-back: the next book starts from what is published</span></div>
+    <div class="scenes">
+
+      <section class="scene s-next">
+        <div class="cap">
+          <h2>The stories</h2>
+          <span class="branch">next</span>
+          <p>Every PR merges here once it passes the checks. The stories pile up between releases, each with its changelog entry waiting.</p>
+          <span class="deploys">The flow deploys nothing from here, so people try it on staging.</span>
+        </div>
+        <div class="art desk">
+          <div class="gate">
+            <strong>Before a story lands here</strong>
+            <ul>
+              <li><span>It arrives by PR, not a direct push</span></li>
+              <li><span>Your CI's checks pass</span></li>
+              <li><span><code>bin/release check</code> passes: shipped notes are unchanged</span></li>
+              <li class="opt"><span>Any approval your branch rules require</span></li>
+            </ul>
+            <div class="not">Not here: anyone clicking through the stories together. That waits for staging.</div>
+          </div>
+          <span class="sheet pink"><span class="no">#46</span>Show who's online</span>
+          <span class="sheet graph"><span class="no">#45</span>Add CSV export</span>
+          <span class="sheet typed"><span class="no">#44</span>Tidy the settings form</span>
+          <span class="sheet sticky"><span class="no">#43</span>Speed up search</span>
+          <span class="sheet card"><span class="no">#42</span>Add the reports page</span>
+          <span class="sheet kraft"><span class="no">#41</span>Fix the sign-in loop</span>
+          <span class="count">6 stories waiting</span>
+        </div>
+      </section>
+
+      <div class="step"><b>↓</b><span><code>bin/release prepare</code> names the release and gathers <code>changelog.d/</code> into its contents page, by PR into <code>next</code></span></div>
+      <div class="step"><b>↓</b><span><code>bin/release cut</code> binds that pile into a book, once CI has passed on it, and opens its PR into <code>main</code></span></div>
+      <div class="step note"><span>With <code>AUTO_RELEASE</code> on, these two run on their own. Shipping stays a person's call: run <code>bin/release ship</code>, or merge the release PR on GitHub and the workflow finishes it.</span></div>
+
+      <section class="scene s-rel">
+        <div class="cap">
+          <h2>The book</h2>
+          <span class="branch">release/2026.10.27</span>
+          <p>Bound, not yet published. Stories merged after naming wait for the next book. Each page is checked on staging. A fix goes in by PR, with its line in this release's section; a page that isn't ready comes out by revert.</p>
+          <span class="deploys">Deploys to staging for proofreading.</span>
+        </div>
+        <div class="art">
+          <div class="book-wrap">
+            <div class="spread">
+              <div class="page">
+                <span class="running">Release 2026.10.27 · What ships</span>
+                <ol class="toc">
+                  <li><span class="k c-kraft">1</span><span class="t">Fix the sign-in loop</span><span class="ok">✓</span></li>
+                  <li><span class="k c-card">2</span><span class="t">Add the reports page</span><span class="ok">✓</span></li>
+                  <li><span class="k c-sticky">3</span><span class="t">Speed up search</span><span class="ok">✓</span></li>
+                  <li><span class="k c-typed">4</span><span class="t">Tidy the settings form</span><span class="ok"></span></li>
+                  <li><span class="k c-graph">5</span><span class="t">Add CSV export</span><span class="ok"></span></li>
+                  <li><span class="k c-pink">6</span><span class="t">Show who's online</span><span class="ok"></span></li>
+                </ol>
+                <span class="folio">ii</span>
+              </div>
+              <div class="page">
+                <span class="running">Page 1</span>
+                <span class="chapter">Fix the sign-in loop</span>
+                <span class="scrap">
+                  <span class="tape l"></span><span class="tape r"></span>
+                  <span class="tipped"><span class="no">#41</span>Fix the sign-in loop</span>
+                </span>
+                <span class="lines"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="folio">1</span>
+              </div>
+              <span class="stamp">PROOF<small>on staging</small></span>
+            </div>
+            <div class="tabs" aria-hidden="true">
+              <span class="c-kraft">1</span><span class="c-card">2</span><span class="c-sticky">3</span><span class="c-typed">4</span><span class="c-graph">5</span><span class="c-pink">6</span>
+            </div>
+            <span class="proof-note">✓ = proofread on staging so far, working through "What ships"</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="step"><b>↓</b><span><code>bin/release ship</code> asks first, then publishes the commit that was proofread. If the branch moved, nothing ships</span></div>
+
+      <section class="scene s-main">
+        <div class="cap">
+          <h2>Published</h2>
+          <span class="branch">main</span>
+          <p>One release at a time. Shipping tags it and gives it a GitHub Release listing its contents, then merges <code>main</code> back into <code>next</code>. Earlier versions stay in the archive under their tags.</p>
+          <span class="deploys">Published means running in production.</span>
+        </div>
+        <div class="art">
+          <div class="print">
+            <span class="label prod">what everyone sees ↓</span>
+            <div class="stand">
+              <div class="cover">
+                <span class="kicker">Release</span>
+                <span class="ed">v2026.10.27</span>
+                <span class="sub">6 stories</span>
+                <span class="ribbon">LIVE</span>
+              </div>
+            </div>
+            <div class="archive">
+              <div class="files">
+                <span class="file">v2026.10.20</span>
+                <span class="file">v2026.10.13</span>
+                <span class="file">v2026.10.06</span>
+                <span class="file">v2026.09.29</span>
+              </div>
+              <div class="box-front"><strong>ARCHIVE</strong><span>earlier versions, each kept by its tag</span></div>
+            </div>
+            <span class="label back">something wrong? redeploy an earlier tag. that's your deploy's job; bin/release has no rollback</span>
+          </div>
+          <div class="erratum"><strong>An erratum (a hotfix)</strong>A fix production can't wait for goes to <code>main</code> by PR, with its entry in <code>changelog.d/</code>. Then <code>bin/release merge-back</code>.</div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</main>
+
+</body></html>
