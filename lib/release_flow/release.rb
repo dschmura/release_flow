@@ -74,7 +74,7 @@ module ReleaseFlow
       open = remote_refs.find { |ref| ref.start_with?("refs/heads/release/") && ref != "refs/heads/#{branch}" }
       raise Error, "#{open.delete_prefix("refs/heads/")} is still open: ship it or delete it before cutting another" if open
       commit, waiting = cut_point(name)
-      raise Error, "#{production} isn't in #{integration} yet: merge the open merge-back PR first" unless ancestor?("origin/#{production}", commit)
+      raise Error, "#{production} isn't in #{integration} yet: #{production_catch_up}" unless ancestor?("origin/#{production}", commit)
       require_passing_ci(commit, name)
 
       say("== Cut #{branch} in #{@repo} ==")
@@ -182,6 +182,17 @@ module ReleaseFlow
 
     def waiting_to_cut?(name) = name && !shipped?(name) && !branch?("release/#{name}")
 
+    def production_catch_up
+      return "merge the open merge-back PR first" if remote_refs.any? { |ref| ref.start_with?("refs/heads/merge-back/") }
+
+      merged = JSON.parse(gh("pr", "list", "--base", production, "--state", "merged", "--limit", "30", "--json", "number,headRefName,headRefOid"))
+      unshipped = merged.find { |pr| (name = pr["headRefName"][Candidate::BRANCH, 1]) && !shipped?(name) }
+      return "run bin/release merge-back" unless unshipped
+
+      "release #{unshipped["headRefName"][Candidate::BRANCH, 1]} merged without being shipped: " \
+        "run bin/release ship #{unshipped["number"]} #{unshipped["headRefOid"][0, 7]} to publish it and merge #{production} back"
+    end
+
     def require_passing_ci(commit, name)
       runs = JSON.parse(gh("run", "list", "--workflow", @config.ci_workflow, "--commit", commit, "--event", "push", "--json", "status,conclusion"))
       unless runs.any? && runs.all? { |run| run["status"] == "completed" }
@@ -235,8 +246,13 @@ module ReleaseFlow
 
       notes = fit(Changelog.section(git("show", "#{commit}:CHANGELOG.md"), name).to_s,
         BODY_LIMIT, "the full list is in CHANGELOG.md at v#{name}")
-      gh("release", "create", "v#{name}", "--target", commit, "--title", "Release #{name}", "--notes-file", "-", stdin: notes)
-      say("  → merged and published v#{name}")
+      err, created = gh("release", "create", "v#{name}", "--target", commit, "--title", "Release #{name}", "--notes-file", "-", stdin: notes, status: true)
+      return say("  → merged and published v#{name}") if created
+
+      fetch
+      raise Error, "gh release create failed: #{err}" unless tagged?(name)
+
+      say("  ✓ v#{name} already published")
     end
 
     # Pushes the branch unless a stopped run already did, then opens its PR or finds the open one.

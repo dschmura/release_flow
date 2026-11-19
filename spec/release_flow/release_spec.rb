@@ -14,6 +14,7 @@ RSpec.describe ReleaseFlow::Release do
   let(:gh_runs) { %q(echo '[{"status":"completed","conclusion":"success"}]') }
   let(:gh_prs) { "echo '[]'" }
   let(:gh_deploys) { "echo '[]'" }
+  let(:gh_release) { "exit 0" }
   let(:changelog) do
     <<~MD
       # Changelog
@@ -93,6 +94,7 @@ RSpec.describe ReleaseFlow::Release do
         "pr view"*) if [ -f "#{bin}/merged" ]; then cat "#{bin}/merged.json"; else cat "#{bin}/open.json"; fi ;;
         "pr merge"*"--match-head-commit"*) ( #{gh_merge} ); s=$?; [ $s = 0 ] && touch "#{bin}/merged"; exit $s ;;
         "api -X PUT"*) #{gh_api} ;;
+        "release create"*) #{gh_release} ;;
         "run list --workflow deploy.yml"*) #{gh_deploys} ;;
         "run list"*) #{gh_runs} ;;
         *) : ;;
@@ -562,7 +564,30 @@ RSpec.describe ReleaseFlow::Release do
       git("commit", "-q", "--allow-empty", "-m", "hotfix")
       git("push", "-q", "origin", "HEAD:main")
 
-      expect { run_release("cut") }.to raise_error(ReleaseFlow::Release::Error, /main isn't in next yet/)
+      expect { run_release("cut") }.to raise_error(ReleaseFlow::Release::Error, /main isn't in next yet: run bin\/release merge-back/)
+    end
+
+    context "when main is ahead of next" do
+      before do
+        setup_repo(next_changelog: named)
+        git("commit", "-q", "--allow-empty", "-m", "release 2026.10.26")
+        git("push", "-q", "origin", "HEAD:main")
+      end
+
+      it "waits on the merge-back PR when one is open" do
+        git("push", "-q", "origin", "HEAD:refs/heads/merge-back/2026.10.26")
+
+        expect { run_release("cut") }.to raise_error(ReleaseFlow::Release::Error, /merge the open merge-back PR first/)
+      end
+
+      context "because a release PR was merged on GitHub and never shipped" do
+        let(:gh_prs) { %(echo '[{"number":41,"headRefName":"release/2026.10.26","headRefOid":"abc1234#{"0" * 33}"}]') }
+
+        it "names the release and the command that finishes shipping it" do
+          expect { run_release("cut") }.to raise_error(ReleaseFlow::Release::Error,
+            /release 2026\.10\.26 merged without being shipped: run bin\/release ship 41 abc1234 to publish it and merge main back/)
+        end
+      end
     end
   end
 
@@ -721,6 +746,26 @@ RSpec.describe ReleaseFlow::Release do
       expect(calls).not_to include("--match-head-commit")
       expect(calls).not_to include("release create")
       expect(remote_heads).to include("merge-back/2026.10.27")
+    end
+
+    context "when the release workflow publishes the tag first" do
+      let(:gh_release) { %(git -C "#{clone}" push -q origin main:refs/tags/v2026.10.27; echo 'HTTP 422: Validation Failed' >&2; exit 1) }
+
+      it "counts the release as published and still merges back" do
+        run_release("ship", "42", "abc1234")
+
+        expect(@output).to include("✓ v2026.10.27 already published")
+        expect(remote_heads).to include("merge-back/2026.10.27")
+      end
+    end
+
+    context "when publishing fails and no tag exists" do
+      let(:gh_release) { "echo 'HTTP 403: Resource not accessible' >&2; exit 1" }
+
+      it "stops before merging back" do
+        expect { run_release("ship", "42", "abc1234") }.to raise_error(ReleaseFlow::Release::Error, /gh release create failed: HTTP 403/)
+        expect(remote_heads).not_to include("merge-back/2026.10.27")
+      end
     end
 
     it "refuses an already-merged PR whose merged head isn't the reviewed commit" do

@@ -28,6 +28,35 @@ RSpec.describe ReleaseFlow::Installer do
     expect(YAML.safe_load(root.join(".github/workflows/next_release.yml").read, aliases: true)).to include("jobs")
   end
 
+  describe "the release workflow's jobs" do
+    let(:workflow) do
+      root.join(".release_flow.yml").write("integration_branch: develop\nproduction_branch: trunk\n")
+      init
+      YAML.safe_load(root.join(".github/workflows/next_release.yml").read, aliases: true)
+    end
+    let(:triggers) { workflow[true] }
+    let(:jobs) { workflow["jobs"] }
+
+    it "hears merged PRs into both branches" do
+      expect(triggers.dig("pull_request", "branches")).to eq(%w[develop trunk])
+    end
+
+    it "names a release only after a merge into the integration branch" do
+      expect(jobs.dig("prepare", "if")).to include("github.event.pull_request.base.ref == 'develop'")
+    end
+
+    it "finishes shipping a release PR merged into production on GitHub, at the head that merged" do
+      ship = jobs.fetch("ship")
+
+      expect(ship["if"]).to include("github.event.pull_request.merged")
+        .and include("github.event.pull_request.base.ref == 'trunk'")
+        .and include("startsWith(github.event.pull_request.head.ref, 'release/')")
+      step = ship["steps"].find { |s| s["run"].to_s.include?("bin/release ship") }
+      expect(step["env"]).to include("PR" => "${{ github.event.pull_request.number }}", "HEAD_SHA" => "${{ github.event.pull_request.head.sha }}")
+      expect(step["run"]).to include('bin/release ship "$PR" "$HEAD_SHA"')
+    end
+  end
+
   it "starts a CHANGELOG.md with an [Unreleased] section when there is none" do
     init
 
