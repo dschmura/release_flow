@@ -61,6 +61,19 @@ RSpec.describe ReleaseFlow::Changelog do
         expect { described_class.name_release(empty, "2026.10.27") }.to raise_error(ReleaseFlow::Changelog::Error, /nothing/)
       end
     end
+
+    it "names a first release when the changelog is only an empty [Unreleased], ending with one newline" do
+      first = "# Changelog\n\n## [Unreleased]\n"
+
+      named = described_class.name_release(first, "2026.11.20", ["### Added\n\n- First feature.\n"])
+
+      expect(named).to eq("# Changelog\n\n## [Unreleased]\n\n## v2026.11.20\n\n### Added\n\n- First feature.\n")
+    end
+
+    it "refuses a first release with nothing to release, rather than crashing" do
+      expect { described_class.name_release("# Changelog\n\n## [Unreleased]\n", "2026.11.20") }
+        .to raise_error(ReleaseFlow::Changelog::Error, /nothing/)
+    end
   end
 
   describe ".named_release and .section" do

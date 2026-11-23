@@ -22,11 +22,12 @@ module ReleaseFlow
       raise Error, "CHANGELOG.md has no #{UNRELEASED.strip} section" if rest.nil?
 
       body, tail = rest.split(/^(?=## )/, 2)
-      sections = fold([body, *fragments])
+      sections = fold([body.to_s, *fragments])
       raise Error, "no entries under #{UNRELEASED.strip} or in #{FRAGMENTS}/; there is nothing to release" if sections.empty?
 
       released = sections.map { |title, lines| "### #{title}\n\n#{lines.join("\n")}\n" }.join("\n")
-      "#{head}#{UNRELEASED}\n## v#{name}\n\n#{released}\n#{tail}"
+      named = "#{head}#{UNRELEASED}\n## v#{name}\n\n#{released}"
+      tail.to_s.empty? ? named : "#{named}\n#{tail}"
     end
 
     def fragment?(path) = path.match?(%r{\A#{FRAGMENTS}/[^/]+\.md\z}o) && File.basename(path) != "README.md"
