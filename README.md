@@ -92,12 +92,30 @@ what, and the command to run next:
 == Release status in me/app ==
   shipped: v2026.10.20
   heads: main at def5678, next at abc1234; main is in next
-  next: v2026.10.27 is named, waiting to be cut
+  next: v2026.10.27 is cut, on release/2026.10.27
   CI on next at abc1234: passed, jobs 20/20 passed, 0 running, 0 failed
   release PR #42 (release/2026.10.27 at abc1234): https://github.com/me/app/pull/42
     checks 14/20 passed, 6 running, 0 failed; mergeable
 Waiting: release PR #42's checks are still running.
 Next: bin/release ship 42 abc1234 once checks pass and it's reviewed on staging.
+```
+
+**Wait for it.** `prepare`, `cut`, `ship` and `merge-back` return once
+they've opened their PR. Add `--wait` and they follow it until the next step
+is yours, printing a line, with the time since it started, each time its
+stage changes: `prepare` and `merge-back` (and `ship`, for its merge-back)
+until the PR merges, and `cut` until CI on `next` has finished and then
+until every check on the release PR has passed. A failing check or a closed
+PR is named and exits non-zero. It polls every 20 seconds and gives up after
+45 minutes, or `--timeout MINUTES`. Ctrl-C stops watching and changes
+nothing; `bin/release status` picks up from there.
+
+```text
+  [0m00s] CI on next at abc1234: finished
+  [0m00s] release PR #42: no checks reported yet
+  [0m20s] release PR #42: checks running, 1/2 passed, 1 running, 0 failed
+  [1m00s] release PR #42: all 2 checks passed
+Next: review it on staging, then bin/release ship 42 abc1234.
 ```
 
 Every command takes `--dry-run`. A release is named for the day,
