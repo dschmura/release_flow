@@ -208,6 +208,7 @@ module ReleaseFlow
     def ci_passed?(commit, name)
       runs = JSON.parse(gh("run", "list", "--workflow", @config.ci_workflow, "--commit", commit, "--event", "push", "--json", "status,conclusion"))
       unless runs.any? && runs.all? { |run| run["status"] == "completed" }
+        require_ci_on_integration if runs.empty?
         return false if @opts[:if_needed]
 
         raise Error, "CI hasn't passed on #{commit[0, 7]} yet: run cut again once it has"
@@ -216,6 +217,15 @@ module ReleaseFlow
 
       raise Error, "CI failed on #{commit[0, 7]}, where v#{name} would be cut. If it was a flake, re-run its failed jobs; otherwise " \
                    "fix it by a PR into #{integration}, its changelog line under ## v#{name}. Then cut again (AUTO_RELEASE does once CI passes)"
+    end
+
+    # A workflow that never ran on the integration branch is misnamed, not slow, so waiting on it would never end.
+    def require_ci_on_integration
+      ran = JSON.parse(gh("run", "list", "--workflow", @config.ci_workflow, "--branch", integration, "--event", "push", "--limit", "1", "--json", "databaseId"))
+      return if ran.any?
+
+      raise Error, "#{@config.ci_workflow} has never run on #{integration}, so there's no CI for cut to wait on: " \
+                   "set ci_workflow in #{FILE} to the workflow that runs your checks on pushes to #{integration}"
     end
 
     def fetch

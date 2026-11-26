@@ -13,6 +13,7 @@ RSpec.describe ReleaseFlow::Release do
   let(:gh_api) { "exit 0" }
   let(:gh_runs) { %q(echo '[{"status":"completed","conclusion":"success"}]') }
   let(:gh_prs) { "echo '[]'" }
+  let(:gh_branch_runs) { %q(echo '[{"databaseId":1}]') }
   let(:gh_deploys) { "echo '[]'" }
   let(:gh_release) { "exit 0" }
   let(:changelog) do
@@ -100,6 +101,7 @@ RSpec.describe ReleaseFlow::Release do
         "api -X PUT"*) #{gh_api} ;;
         "release create"*) #{gh_release} ;;
         "run list --workflow deploy.yml"*) #{gh_deploys} ;;
+        "run list"*"--branch next"*) #{gh_branch_runs} ;;
         "run list"*) #{gh_runs} ;;
         *) : ;;
       esac
@@ -520,6 +522,18 @@ RSpec.describe ReleaseFlow::Release do
         run_release("cut", if_needed: true)
 
         expect(@output).to match(/CI hasn't finished on \h{7} yet; the cut runs again when it does\./)
+      end
+
+      context "because the configured CI workflow has never run on next" do
+        let(:gh_branch_runs) { "echo '[]'" }
+
+        it "refuses even under --if-needed, naming the workflow and where to set it" do
+          setup_repo(next_changelog: named)
+
+          expect { run_release("cut", if_needed: true) }
+            .to raise_error(ReleaseFlow::Release::Error, /ci\.yml has never run on next.*ci_workflow in \.release_flow\.yml/m)
+          expect(calls).to include("CALL run list --workflow ci.yml --branch next --event push --limit 1")
+        end
       end
     end
 
