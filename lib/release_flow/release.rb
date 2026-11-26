@@ -11,13 +11,16 @@ require "tmpdir"
 module ReleaseFlow
   class Release
     class Error < ReleaseFlow::Error; end
+    class Stopped < Error; end
 
     CLEAN_GIT_ENV = GitEnv::HASH
     TEMPLATE = ".github/PULL_REQUEST_TEMPLATE/release.md"
     SHIP_USAGE = "bin/release ship [<PR> <commit reviewed on staging>]"
-    USAGE = "usage: bin/release prepare | cut | #{SHIP_USAGE.delete_prefix("bin/release ")} | merge-back | check"
+    USAGE = "usage: bin/release prepare | cut | #{SHIP_USAGE.delete_prefix("bin/release ")} | merge-back | check | status"
     ONCE_READY = "once its checks pass and any required approval is given"
     BODY_LIMIT = 60_000
+    INTERVAL = 20
+    TIMEOUT = 45 * 60
 
     def initialize(options, root: Dir.pwd, config: nil)
       @opts = options
@@ -28,6 +31,7 @@ module ReleaseFlow
     def run(command, *args)
       @repo = GithubOrigin.repo(@root) or raise Error, "origin isn't a GitHub repository, so there's no telling which one to act on"
       case command
+      when "status" then status
       when "prepare" then prepare
       when "cut" then cut
       when "ship" then ship(*args)
@@ -35,6 +39,20 @@ module ReleaseFlow
       when "check" then check
       else raise Error, USAGE
       end
+    end
+
+    def status
+      fetch
+      changelog = next_changelog
+      named = Changelog.named_release(changelog)
+      head = git("rev-parse", "origin/#{integration}")
+      say(Status.report(
+        repo: @repo, integration: integration, production: production, shipped: latest_shipped,
+        integration_head: head, production_head: git("rev-parse", "origin/#{production}"),
+        merged_back: ancestor?("origin/#{production}", "origin/#{integration}"),
+        waiting: Changelog.unreleased(changelog, fragments_at("origin/#{integration}").values).size,
+        named: (named unless shipped?(named)), ci: ci_progress(head), prs: open_flow_prs
+      ))
     end
 
     def prepare
@@ -59,7 +77,10 @@ module ReleaseFlow
       url = propose("changelog/#{name}", at: commit, base: integration, title: "Changelog for release #{name}",
         body: "Gathers `changelog.d/` and `[Unreleased]` into v#{name} so `bin/release cut` can cut it.\n", auto_merge: true)
       say("  → #{url}, merging into #{integration} #{ONCE_READY}")
-      say("Then: bin/release cut, once it has merged.")
+      return say("Then: bin/release cut, once it has merged.") unless waiting?
+
+      follow_pr(url, "changelog PR", until_merged: true)
+      say("Next: bin/release cut --wait.")
     end
 
     def cut
@@ -75,6 +96,7 @@ module ReleaseFlow
       raise Error, "#{open.delete_prefix("refs/heads/")} is still open: ship it or delete it before cutting another" if open
       commit, waiting = cut_point(name)
       raise Error, "#{production} isn't in #{integration} yet: #{production_catch_up}" unless ancestor?("origin/#{production}", commit)
+      follow_ci(commit) if waiting?
       unless ci_passed?(commit, name)
         return notice("CI hasn't finished on #{commit[0, 7]} yet; the cut runs again when it does.", title: "The release cut waits for CI")
       end
@@ -86,7 +108,10 @@ module ReleaseFlow
       url = propose(branch, at: commit, base: production, title: "Release #{name}",
         body: release_body(branch, Changelog.section(git("show", "#{commit}:CHANGELOG.md"), name)))
       say("  → #{url}")
-      say("Then: review it on staging, and run bin/release ship.")
+      return say("Then: review it on staging, and run bin/release ship.") unless waiting?
+
+      follow_pr(url, "release PR", until_merged: false)
+      say("Next: review it on staging, then bin/release ship #{url.split("/").last} #{commit[0, 7]}.")
     end
 
     def ship(pr = nil, sha = nil)
@@ -129,6 +154,10 @@ module ReleaseFlow
       already_current = out.include?("no new commits on the base branch")
       say("  ! GitHub couldn't bring #{url} up to date; press Update branch on it") unless updated || already_current
       say("  → #{url}, merging into #{integration} #{ONCE_READY}")
+      return unless waiting?
+
+      follow_pr(url, "merge-back PR", until_merged: true)
+      say("Done: #{production} is back in #{integration}.")
     end
 
     private
@@ -142,6 +171,7 @@ module ReleaseFlow
     end
 
     def dry_run? = @opts[:dry_run]
+    def waiting? = @opts[:wait] && !dry_run?
     def say(msg) = puts(msg)
     def dry(msg) = say("  [dry-run] would #{msg}")
     def next_changelog = git("show", "origin/#{integration}:CHANGELOG.md")
@@ -182,6 +212,88 @@ module ReleaseFlow
 
     def template_repo = @config.template
     def pr_info(pr) = JSON.parse(gh("pr", "view", pr, "--json", "state,headRefName,headRefOid,baseRefName,mergeCommit"))
+
+    # Polls until the block says :done, printing a line only when the stage it reports changes.
+    def watch(subject)
+      clock = @opts.fetch(:clock) { -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) } }
+      timeout = @opts.fetch(:timeout, TIMEOUT)
+      started = clock.call
+      last = nil
+      loop do
+        stage, line, verdict = yield
+        elapsed = (clock.call - started).to_i
+        say(format("  [%dm%02ds] %s: %s", elapsed / 60, elapsed % 60, subject, line)) unless stage == last
+        $stdout.flush
+        last = stage
+        return if verdict == :done
+        raise Error, "#{subject}: #{line}" if verdict == :failed
+        raise Error, "stopped waiting on #{subject} after #{timeout / 60} min; nothing was changed. bin/release status shows where it stands" if elapsed >= timeout
+
+        @opts.fetch(:sleeper) { method(:sleep) }.call(@opts.fetch(:interval, INTERVAL))
+      end
+    rescue Interrupt
+      raise Stopped, "stopped watching #{subject}; nothing was changed. bin/release status shows where it stands"
+    end
+
+    def follow_pr(url, label, until_merged:)
+      watch("#{label} ##{url.split("/").last}") do
+        pr = JSON.parse(gh("pr", "view", url, "--json", "state,mergeable,statusCheckRollup"))
+        checks = Status.tally(pr["statusCheckRollup"] || [])
+        verdict = Status.verdict(checks)
+        if pr["state"] == "MERGED" then [:merged, "merged", :done]
+        elsif pr["state"] == "CLOSED" then [:closed, "closed without merging", :failed]
+        elsif verdict == :failed then [:failed, "checks failed, #{Status.checks(checks)}", :failed]
+        elsif pr["mergeable"] == "CONFLICTING" then [:conflicts, "has conflicts with its base", :failed]
+        elsif verdict == :passed && until_merged then [:passed, "all #{checks[:total]} checks passed; waiting for it to merge"]
+        elsif verdict == :passed then [:passed, "all #{checks[:total]} checks passed", :done]
+        elsif checks[:total].zero? then [:none, "no checks reported yet"]
+        else [:running, "checks running, #{Status.checks(checks)}"]
+        end
+      end
+    end
+
+    # Waits for every CI run on the commit to finish; ci_passed? then judges them.
+    def follow_ci(commit)
+      watch("CI on #{integration} at #{commit[0, 7]}") do
+        ci = ci_progress(commit)
+        require_ci_on_integration unless ci[:ran]
+        if ci[:finished] then [:finished, "finished", :done]
+        elsif ci[:ran] then [:running, "running, jobs #{Status.checks(ci)}"]
+        else [:none, "not started"]
+        end
+      end
+    end
+
+    def latest_shipped
+      git("tag", "--merged", "origin/#{production}", "--sort=-creatordate", "--list", "v*").lines(chomp: true)
+        .filter_map { |tag| tag[/\Av(#{Changelog::NAME})\z/o, 1] }.first
+    end
+
+    def ci_progress(commit)
+      runs = JSON.parse(gh("run", "list", "--workflow", @config.ci_workflow, "--commit", commit, "--event", "push", "--json", "databaseId,status,conclusion"))
+      return {passed: 0, running: 0, failed: 0, total: 0, failing: [], ran: false} if runs.empty?
+
+      jobs = JSON.parse(gh("run", "view", runs.first["databaseId"].to_s, "--json", "jobs"))["jobs"]
+      Status.tally(jobs).merge(ran: true, finished: runs.all? { |run| run["status"] == "completed" })
+    end
+
+    # One call for every open PR, kept to the branches the flow opens.
+    def open_flow_prs
+      prs = JSON.parse(gh("pr", "list", "--state", "open", "--limit", "100", "--json",
+        "number,url,headRefName,headRefOid,baseRefName,mergeable,statusCheckRollup"))
+      prs.filter_map do |pr|
+        kind = flow_kind(pr["headRefName"], pr["baseRefName"]) or next
+        {kind: kind, number: pr["number"], url: pr["url"], branch: pr["headRefName"], head: pr["headRefOid"],
+         mergeable: pr["mergeable"], checks: Status.tally(pr["statusCheckRollup"] || [])}
+      end
+    end
+
+    def flow_kind(branch, base)
+      return :release if base == production && branch.match?(Candidate::BRANCH)
+      return unless base == integration
+
+      {"merge-back/" => :merge_back, "changelog/" => :changelog}.find { |prefix, _| branch.start_with?(prefix) }&.last
+    end
 
     def release_under_way(changelog)
       named = Changelog.named_release(changelog)

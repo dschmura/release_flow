@@ -19,6 +19,23 @@ RSpec.describe ReleaseFlow::CLI do
       .to output(%r{see https://example\.com/releasing}).to_stdout
   end
 
+  it "passes --wait and a --timeout in minutes to the flow" do
+    flow = instance_double(ReleaseFlow::Release, run: nil)
+    allow(ReleaseFlow::Release).to receive(:new).and_return(flow)
+
+    expect(described_class.start(["cut", "--wait", "--timeout", "10"], root: root.to_s)).to eq(0)
+    expect(ReleaseFlow::Release).to have_received(:new).with({wait: true, timeout: 600}, root: root.to_s, config: anything)
+  end
+
+  it "exits 130 with how to resume when a wait is interrupted" do
+    flow = instance_double(ReleaseFlow::Release)
+    allow(flow).to receive(:run).and_raise(ReleaseFlow::Release::Stopped, "stopped watching release PR #42")
+    allow(ReleaseFlow::Release).to receive(:new).and_return(flow)
+
+    expect { expect(described_class.start(["cut", "--wait"], root: root.to_s)).to eq(130) }
+      .to output("bin/release: stopped watching release PR #42\n").to_stderr
+  end
+
   it "fails with the reason on an option it doesn't know" do
     expect { expect(described_class.start(["--frobnicate"], root: root.to_s)).to eq(1) }
       .to output(/bin\/release: invalid option: --frobnicate/).to_stderr

@@ -16,6 +16,9 @@ RSpec.describe ReleaseFlow::Release do
   let(:gh_branch_runs) { %q(echo '[{"databaseId":1}]') }
   let(:gh_deploys) { "echo '[]'" }
   let(:gh_release) { "exit 0" }
+  let(:gh_open_prs) { "echo '[]'" }
+  let(:gh_jobs) { %q(echo '{"jobs":[]}') }
+  let(:gh_pr_checks) { %q(echo '{"state":"MERGED","mergeable":"UNKNOWN","statusCheckRollup":[]}') }
   let(:changelog) do
     <<~MD
       # Changelog
@@ -94,7 +97,9 @@ RSpec.describe ReleaseFlow::Release do
       case "$*" in *"-file -"*) echo "BODY<<" >> "#{log}"; cat >> "#{log}"; echo ">>BODY" >> "#{log}" ;; esac
       case "$*" in
         "pr create"*) #{gh_create} ;;
+        "pr view"*"statusCheckRollup"*) #{gh_pr_checks} ;;
         "pr view"*"--jq .url"*) echo "https://github.com/me/app/pull/41" ;;
+        "pr list --state open"*) #{gh_open_prs} ;;
         "pr list"*) #{gh_prs} ;;
         "pr view"*) if [ -f "#{bin}/merged" ]; then cat "#{bin}/merged.json"; else cat "#{bin}/open.json"; fi ;;
         "pr merge"*"--match-head-commit"*) ( #{gh_merge} ); s=$?; [ $s = 0 ] && touch "#{bin}/merged"; exit $s ;;
@@ -103,6 +108,7 @@ RSpec.describe ReleaseFlow::Release do
         "run list --workflow deploy.yml"*) #{gh_deploys} ;;
         "run list"*"--branch next"*) #{gh_branch_runs} ;;
         "run list"*) #{gh_runs} ;;
+        "run view"*) #{gh_jobs} ;;
         *) : ;;
       esac
     SH
@@ -132,6 +138,16 @@ RSpec.describe ReleaseFlow::Release do
   def terminal(answer) = StringIO.new(answer).tap { |io| io.define_singleton_method(:tty?) { true } }
 
   def calls = log.exist? ? log.read : ""
+
+  # A gh answer that changes from one call to the next, staying on the last.
+  def in_turn(name, *outputs)
+    bin.mkpath
+    outputs.each_with_index { |out, i| bin.join("#{name}#{i + 1}").write(out) }
+    bin.join("#{name}.last").write(outputs.last)
+    count = bin.join("#{name}.n")
+    %(n=$(( $(cat "#{count}" 2>/dev/null || echo 0) + 1 )); echo $n > "#{count}"; cat "#{bin}/#{name}$n" 2>/dev/null || cat "#{bin}/#{name}.last")
+  end
+
   def remote_heads = git("ls-remote", "--heads", "origin").lines.map { |l| l.split.last.delete_prefix("refs/heads/") }
 
   def add_fragment(name, text)
@@ -700,6 +716,196 @@ RSpec.describe ReleaseFlow::Release do
 
       expect { run_release("cut", if_needed: true) }
         .to raise_error(ReleaseFlow::Release::Error, %r{can't read the tags of me/private-template})
+    end
+  end
+
+  describe "status" do
+    let(:gh_runs) { %q(echo '[{"databaseId":7,"status":"in_progress","conclusion":""}]') }
+    let(:gh_jobs) do
+      jobs = [{name: "test (1)", status: "completed", conclusion: "success"}, {name: "test (2)", status: "in_progress", conclusion: ""}]
+      "echo '#{JSON.dump(jobs: jobs)}'"
+    end
+
+    before do
+      setup_repo(next_changelog: named)
+      git("push", "-q", "origin", "origin/main:refs/tags/v2026.10.20", "origin/main:refs/tags/v2.0.0")
+    end
+
+    it "reports where the chain stands and the command that comes next, changing nothing" do
+      refs = git("ls-remote", "origin")
+      run_release("status")
+
+      expect(@output).to include("shipped: v2026.10.20")
+        .and include("next: v2026.10.27 is named, waiting to be cut")
+        .and include("CI on next at #{git("rev-parse", "--short=7", "origin/next")}: running, jobs 1/2 passed, 1 running, 0 failed")
+        .and include("Next: bin/release cut once it passes")
+      expect(calls).to include("CALL run view 7 --json jobs")
+      expect(calls).not_to match(/CALL (pr create|pr merge|release create|api -X PUT)/)
+      expect(git("ls-remote", "origin")).to eq(refs)
+    end
+
+    context "with a release PR open" do
+      let(:head) { "abc1234#{"0" * 33}" }
+      let(:gh_open_prs) do
+        prs = [{number: 42, url: "https://github.com/me/app/pull/42", headRefName: "release/2026.10.27", baseRefName: "main",
+                headRefOid: head, mergeable: "MERGEABLE",
+                statusCheckRollup: [{name: "test", status: "COMPLETED", conclusion: "SUCCESS"}, {name: "lint", status: "QUEUED", conclusion: ""}]},
+          {number: 9, url: "https://github.com/me/app/pull/9", headRefName: "feature/x", baseRefName: "next",
+           headRefOid: head, mergeable: "MERGEABLE", statusCheckRollup: []}]
+        "echo '#{JSON.dump(prs)}'"
+      end
+
+      it "lists it with its check progress in one call, leaving out PRs that aren't the flow's" do
+        run_release("status")
+
+        expect(@output).to include("release PR #42 (release/2026.10.27 at abc1234): https://github.com/me/app/pull/42")
+          .and include("checks 1/2 passed, 1 running, 0 failed; mergeable")
+          .and end_with("Next: bin/release ship 42 abc1234 once checks pass and it's reviewed on staging.\n")
+        expect(@output).not_to include("#9")
+        expect(calls.scan("CALL pr list").size).to eq(1)
+      end
+    end
+
+    context "when CI hasn't run on next's head" do
+      let(:gh_runs) { "echo '[]'" }
+
+      it "says so without asking for jobs" do
+        run_release("status")
+
+        expect(@output).to include(": not started")
+        expect(calls).not_to include("run view")
+      end
+    end
+  end
+
+  describe "--wait" do
+    let(:slept) { [] }
+    let(:clock) { [0] }
+    let(:waiting) do
+      {wait: true, sleeper: ->(seconds) { slept << seconds and clock[0] += seconds }, clock: -> { clock[0] }}
+    end
+
+    def pr_state(state: "OPEN", mergeable: "MERGEABLE", checks: [])
+      JSON.dump(state: state, mergeable: mergeable, statusCheckRollup: checks.map { |name, conclusion|
+        {name: name, status: conclusion.empty? ? "IN_PROGRESS" : "COMPLETED", conclusion: conclusion}
+      })
+    end
+
+    def lines = @output.lines(chomp: true).grep(/\A  \[/)
+
+    describe "on cut, following the release PR's checks" do
+      let(:half) { pr_state(checks: {"test" => "SUCCESS", "lint" => ""}) }
+      let(:gh_pr_checks) { in_turn("checks", pr_state, half, half, pr_state(checks: {"test" => "SUCCESS", "lint" => "SUCCESS"})) }
+
+      before { setup_repo(next_changelog: named) }
+
+      it "prints a line, with the time since it started, each time the stage changes, and stops once all have passed" do
+        run_release("cut", **waiting)
+
+        expect(lines).to eq([
+          "  [0m00s] CI on next at #{git("rev-parse", "--short=7", "origin/next")}: finished",
+          "  [0m00s] release PR #42: no checks reported yet",
+          "  [0m20s] release PR #42: checks running, 1/2 passed, 1 running, 0 failed",
+          "  [1m00s] release PR #42: all 2 checks passed"
+        ])
+        expect(slept).to eq([20, 20, 20])
+        expect(@output).to end_with("Next: review it on staging, then bin/release ship 42 #{git("rev-parse", "--short=7", "origin/next")}.\n")
+      end
+
+      it "polls at the interval it's given" do
+        run_release("cut", **waiting, interval: 5)
+
+        expect(slept).to eq([5, 5, 5])
+      end
+
+      context "when a check fails" do
+        let(:gh_pr_checks) { in_turn("checks", half, pr_state(checks: {"test" => "SUCCESS", "lint" => "FAILURE"})) }
+
+        it "names it and fails" do
+          expect { run_release("cut", **waiting) }
+            .to raise_error(ReleaseFlow::Release::Error, /release PR #42: checks failed, 1\/2 passed, 0 running, 1 failed \(lint\)/)
+        end
+      end
+
+      context "when the checks outlast the timeout" do
+        let(:gh_pr_checks) { in_turn("checks", half) }
+
+        it "gives up, saying how to look again" do
+          expect { run_release("cut", **waiting, timeout: 60) }
+            .to raise_error(ReleaseFlow::Release::Error, /stopped waiting on release PR #42 after 1 min.*bin\/release status/)
+          expect(slept).to eq([20, 20, 20])
+        end
+      end
+
+      context "when interrupted" do
+        let(:waiting) { {wait: true, sleeper: ->(_) { raise Interrupt }, clock: -> { 0 }} }
+
+        it "stops cleanly, saying nothing changed and how to resume" do
+          expect { run_release("cut", **waiting) }
+            .to raise_error(ReleaseFlow::Release::Stopped, /stopped watching release PR #42; nothing was changed.*bin\/release status/)
+        end
+      end
+    end
+
+    describe "on cut, while CI is still running on next" do
+      let(:gh_runs) do
+        in_turn("runs", '[{"databaseId":7,"status":"in_progress","conclusion":""}]', '[{"databaseId":7,"status":"completed","conclusion":"success"}]')
+      end
+      let(:gh_jobs) { %q(echo '{"jobs":[{"name":"test","status":"completed","conclusion":"success"}]}') }
+
+      it "waits for CI to finish before it cuts" do
+        setup_repo(next_changelog: named)
+        short = git("rev-parse", "--short=7", "origin/next")
+        run_release("cut", **waiting)
+
+        expect(lines.first(2)).to eq([
+          "  [0m00s] CI on next at #{short}: running, jobs 1/1 passed, 0 running, 0 failed",
+          "  [0m20s] CI on next at #{short}: finished"
+        ])
+        expect(remote_heads).to include("release/2026.10.27")
+      end
+    end
+
+    describe "on ship, following the merge-back PR" do
+      let(:release_pr) { {"headRefName" => "release/2026.10.27", "baseRefName" => "main", "headRefOid" => "abc1234#{"0" * 33}"} }
+      let(:gh_pr_checks) { in_turn("checks", pr_state(checks: {"test" => ""}), pr_state(state: "MERGED")) }
+
+      before do
+        setup_repo(next_changelog: named)
+        install_fake_gh(release_pr: release_pr)
+        mark_merged(release_pr, git("rev-parse", "origin/main"))
+      end
+
+      it "stops once it has merged" do
+        run_release("ship", "42", "abc1234", **waiting)
+
+        expect(lines).to eq([
+          "  [0m00s] merge-back PR #42: checks running, 0/1 passed, 1 running, 0 failed",
+          "  [0m20s] merge-back PR #42: merged"
+        ])
+        expect(@output).to end_with("Done: main is back in next.\n")
+      end
+
+      context "when it's closed without merging" do
+        let(:gh_pr_checks) { in_turn("checks", pr_state(state: "CLOSED")) }
+
+        it "fails, saying so" do
+          expect { run_release("ship", "42", "abc1234", **waiting) }
+            .to raise_error(ReleaseFlow::Release::Error, /merge-back PR #42: closed without merging/)
+        end
+      end
+    end
+
+    describe "on prepare" do
+      let(:gh_pr_checks) { in_turn("checks", pr_state(checks: {"test" => ""}), pr_state(state: "MERGED")) }
+
+      it "follows the changelog PR until it merges, then names cut" do
+        setup_repo
+        run_release("prepare", **waiting)
+
+        expect(lines.last).to eq("  [0m20s] changelog PR #42: merged")
+        expect(@output).to end_with("Next: bin/release cut --wait.\n")
+      end
     end
   end
 
