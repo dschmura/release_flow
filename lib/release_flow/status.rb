@@ -64,7 +64,10 @@ module ReleaseFlow
     end
 
     def waiting_line(facts)
-      return "v#{facts[:named]} is named, waiting to be cut" if facts[:named]
+      if (named = facts[:named])
+        cut = facts[:prs].any? { |pr| pr[:branch] == "release/#{named}" }
+        return cut ? "v#{named} is cut, on release/#{named}" : "v#{named} is named, waiting to be cut"
+      end
       return "no changelog entries waiting" if facts[:waiting].zero?
 
       (facts[:waiting] == 1) ? "1 changelog entry waits for a release" : "#{facts[:waiting]} changelog entries wait for a release"

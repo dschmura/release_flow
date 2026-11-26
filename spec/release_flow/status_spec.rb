@@ -98,6 +98,10 @@ RSpec.describe ReleaseFlow::Status do
         .and end_with("Next: bin/release ship 42 abc1234 once checks pass and it's reviewed on staging.")
     end
 
+    it "says the named release is cut, not waiting to be" do
+      expect(report(named: "2026.10.27", prs: [release])).to include("  next: v2026.10.27 is cut, on release/2026.10.27")
+    end
+
     it "is ready to ship once its checks pass" do
       expect(report(prs: [release.merge(checks: passed)]))
         .to end_with("Next: review it on staging, then bin/release ship 42 abc1234.")
