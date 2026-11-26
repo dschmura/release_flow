@@ -13,6 +13,7 @@ RSpec.describe ReleaseFlow::Release do
   let(:gh_api) { "exit 0" }
   let(:gh_runs) { %q(echo '[{"status":"completed","conclusion":"success"}]') }
   let(:gh_prs) { "echo '[]'" }
+  let(:gh_branch_runs) { %q(echo '[{"databaseId":1}]') }
   let(:gh_deploys) { "echo '[]'" }
   let(:gh_release) { "exit 0" }
   let(:changelog) do
@@ -41,8 +42,12 @@ RSpec.describe ReleaseFlow::Release do
   let(:named) { ReleaseFlow::Changelog.name_release(changelog, "2026.10.27") }
   let(:identity) do
     {"GIT_AUTHOR_NAME" => "T", "GIT_AUTHOR_EMAIL" => "t@example.com",
-     "GIT_COMMITTER_NAME" => "T", "GIT_COMMITTER_EMAIL" => "t@example.com"}
+     "GIT_COMMITTER_NAME" => "T", "GIT_COMMITTER_EMAIL" => "t@example.com",
+     "GITHUB_ACTIONS" => nil, "GITHUB_STEP_SUMMARY" => nil}
   end
+  let(:summary) { workdir.join("step_summary.md") }
+
+  def on_github_actions = ENV.update("GITHUB_ACTIONS" => "true", "GITHUB_STEP_SUMMARY" => summary.to_s)
 
   around do |example|
     saved = identity.keys.to_h { |k| [k, ENV.fetch(k, nil)] }
@@ -96,6 +101,7 @@ RSpec.describe ReleaseFlow::Release do
         "api -X PUT"*) #{gh_api} ;;
         "release create"*) #{gh_release} ;;
         "run list --workflow deploy.yml"*) #{gh_deploys} ;;
+        "run list"*"--branch next"*) #{gh_branch_runs} ;;
         "run list"*) #{gh_runs} ;;
         *) : ;;
       esac
@@ -347,6 +353,16 @@ RSpec.describe ReleaseFlow::Release do
       expect(remote_heads).to contain_exactly("main", "next")
     end
 
+    it "flags a release under way on the run and its summary when run by GitHub Actions" do
+      setup_repo(next_changelog: named.sub("## [Unreleased]\n", "## [Unreleased]\n\n### Added\n\n- Later.\n"))
+      on_github_actions
+      run_release("prepare", if_needed: true)
+
+      waits = "v2026.10.27 is named but hasn't shipped, so the next release waits for it."
+      expect(@output).to include("::notice title=The next release waits::#{waits}")
+      expect(summary.read).to include(waits)
+    end
+
     it "starts no release under --if-needed while a changelog PR is waiting to merge" do
       setup_repo
       git("push", "-q", "origin", "origin/next:refs/heads/changelog/2026.10.27")
@@ -473,6 +489,23 @@ RSpec.describe ReleaseFlow::Release do
         expect { run_release("cut") }.to raise_error(ReleaseFlow::Release::Error, /CI hasn't passed on \h{7} yet/)
         expect(remote_heads).not_to include("release/2026.10.27")
       end
+
+      it "waits without failing under --if-needed, since CI finishing runs the cut again" do
+        setup_repo(next_changelog: named)
+        run_release("cut", if_needed: true)
+
+        expect(@output).to include("CI hasn't finished on #{git("rev-parse", "--short=7", "origin/next")} yet; the cut runs again when it does.")
+        expect(remote_heads).not_to include("release/2026.10.27")
+      end
+
+      it "flags the wait on the run and its summary when run by GitHub Actions" do
+        setup_repo(next_changelog: named)
+        on_github_actions
+        run_release("cut", if_needed: true)
+
+        expect(@output).to match(/^::notice title=The release cut waits for CI::CI hasn't finished on \h{7} yet/)
+        expect(summary.read).to match(/CI hasn't finished on \h{7} yet/)
+      end
     end
 
     context "when CI hasn't run on the commit it would cut" do
@@ -482,6 +515,25 @@ RSpec.describe ReleaseFlow::Release do
         setup_repo(next_changelog: named)
 
         expect { run_release("cut") }.to raise_error(ReleaseFlow::Release::Error, /CI hasn't passed on \h{7} yet/)
+      end
+
+      it "waits without failing under --if-needed" do
+        setup_repo(next_changelog: named)
+        run_release("cut", if_needed: true)
+
+        expect(@output).to match(/CI hasn't finished on \h{7} yet; the cut runs again when it does\./)
+      end
+
+      context "because the configured CI workflow has never run on next" do
+        let(:gh_branch_runs) { "echo '[]'" }
+
+        it "refuses even under --if-needed, naming the workflow and where to set it" do
+          setup_repo(next_changelog: named)
+
+          expect { run_release("cut", if_needed: true) }
+            .to raise_error(ReleaseFlow::Release::Error, /ci\.yml has never run on next.*ci_workflow in \.release_flow\.yml/m)
+          expect(calls).to include("CALL run list --workflow ci.yml --branch next --event push --limit 1")
+        end
       end
     end
 

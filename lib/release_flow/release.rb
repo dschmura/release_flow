@@ -42,7 +42,7 @@ module ReleaseFlow
       changelog = next_changelog
       fragments = fragments_at("origin/#{integration}")
       if (under_way = release_under_way(changelog))
-        return say("#{under_way}, so the next release waits for it.") if @opts[:if_needed]
+        return notice("#{under_way}, so the next release waits for it.", title: "The next release waits") if @opts[:if_needed]
 
         raise Error, "#{under_way}: finish that release before starting another"
       end
@@ -75,7 +75,9 @@ module ReleaseFlow
       raise Error, "#{open.delete_prefix("refs/heads/")} is still open: ship it or delete it before cutting another" if open
       commit, waiting = cut_point(name)
       raise Error, "#{production} isn't in #{integration} yet: #{production_catch_up}" unless ancestor?("origin/#{production}", commit)
-      require_passing_ci(commit, name)
+      unless ci_passed?(commit, name)
+        return notice("CI hasn't finished on #{commit[0, 7]} yet; the cut runs again when it does.", title: "The release cut waits for CI")
+      end
 
       say("== Cut #{branch} in #{@repo} ==")
       say("  at #{commit[0, 7]}; #{waiting} later commit#{"s" unless waiting == 1} on next wait#{"s" if waiting == 1} for the next release") if waiting.positive?
@@ -146,6 +148,15 @@ module ReleaseFlow
     def integration = @config.integration_branch
     def production = @config.production_branch
 
+    # A wait nobody reads in a workflow log goes unseen, so Actions also shows it on the run and its summary.
+    def notice(msg, title:)
+      say(msg)
+      return unless ENV["GITHUB_ACTIONS"] == "true"
+
+      say("::notice title=#{title}::#{msg.gsub("%", "%25").gsub("\r", "%0D").gsub("\n", "%0A")}")
+      File.write(ENV["GITHUB_STEP_SUMMARY"], "#{msg}\n", mode: "a") if ENV["GITHUB_STEP_SUMMARY"]
+    end
+
     def fragments_at(commit)
       git("ls-tree", "--name-only", commit, "#{Changelog::FRAGMENTS}/").lines(chomp: true)
         .select { |path| Changelog.fragment?(path) }.to_h { |path| [path, git("show", "#{commit}:#{path}")] }
@@ -193,15 +204,28 @@ module ReleaseFlow
         "run bin/release ship #{unshipped["number"]} #{unshipped["headRefOid"][0, 7]} to publish it and merge #{production} back"
     end
 
-    def require_passing_ci(commit, name)
+    # Under --if-needed a CI run still going is a wait, not a failure: its completion runs cut again.
+    def ci_passed?(commit, name)
       runs = JSON.parse(gh("run", "list", "--workflow", @config.ci_workflow, "--commit", commit, "--event", "push", "--json", "status,conclusion"))
       unless runs.any? && runs.all? { |run| run["status"] == "completed" }
+        require_ci_on_integration if runs.empty?
+        return false if @opts[:if_needed]
+
         raise Error, "CI hasn't passed on #{commit[0, 7]} yet: run cut again once it has"
       end
-      return if runs.all? { |run| run["conclusion"] == "success" }
+      return true if runs.all? { |run| run["conclusion"] == "success" }
 
       raise Error, "CI failed on #{commit[0, 7]}, where v#{name} would be cut. If it was a flake, re-run its failed jobs; otherwise " \
                    "fix it by a PR into #{integration}, its changelog line under ## v#{name}. Then cut again (AUTO_RELEASE does once CI passes)"
+    end
+
+    # A workflow that never ran on the integration branch is misnamed, not slow, so waiting on it would never end.
+    def require_ci_on_integration
+      ran = JSON.parse(gh("run", "list", "--workflow", @config.ci_workflow, "--branch", integration, "--event", "push", "--limit", "1", "--json", "databaseId"))
+      return if ran.any?
+
+      raise Error, "#{@config.ci_workflow} has never run on #{integration}, so there's no CI for cut to wait on: " \
+                   "set ci_workflow in #{FILE} to the workflow that runs your checks on pushes to #{integration}"
     end
 
     def fetch
