@@ -15,7 +15,7 @@ module ReleaseFlow
     CLEAN_GIT_ENV = GitEnv::HASH
     TEMPLATE = ".github/PULL_REQUEST_TEMPLATE/release.md"
     SHIP_USAGE = "bin/release ship [<PR> <commit reviewed on staging>]"
-    USAGE = "usage: bin/release prepare | cut | #{SHIP_USAGE.delete_prefix("bin/release ")} | merge-back | check"
+    USAGE = "usage: bin/release prepare | cut | #{SHIP_USAGE.delete_prefix("bin/release ")} | merge-back | check | status"
     ONCE_READY = "once its checks pass and any required approval is given"
     BODY_LIMIT = 60_000
 
@@ -28,6 +28,7 @@ module ReleaseFlow
     def run(command, *args)
       @repo = GithubOrigin.repo(@root) or raise Error, "origin isn't a GitHub repository, so there's no telling which one to act on"
       case command
+      when "status" then status
       when "prepare" then prepare
       when "cut" then cut
       when "ship" then ship(*args)
@@ -35,6 +36,20 @@ module ReleaseFlow
       when "check" then check
       else raise Error, USAGE
       end
+    end
+
+    def status
+      fetch
+      changelog = next_changelog
+      named = Changelog.named_release(changelog)
+      head = git("rev-parse", "origin/#{integration}")
+      say(Status.report(
+        repo: @repo, integration: integration, production: production, shipped: latest_shipped,
+        integration_head: head, production_head: git("rev-parse", "origin/#{production}"),
+        merged_back: ancestor?("origin/#{production}", "origin/#{integration}"),
+        waiting: Changelog.unreleased(changelog, fragments_at("origin/#{integration}").values).size,
+        named: (named unless shipped?(named)), ci: ci_progress(head), prs: open_flow_prs
+      ))
     end
 
     def prepare
@@ -182,6 +197,36 @@ module ReleaseFlow
 
     def template_repo = @config.template
     def pr_info(pr) = JSON.parse(gh("pr", "view", pr, "--json", "state,headRefName,headRefOid,baseRefName,mergeCommit"))
+
+    def latest_shipped
+      git("tag", "--merged", "origin/#{production}", "--sort=-creatordate", "--list", "v*").lines(chomp: true)
+        .filter_map { |tag| tag[/\Av(#{Changelog::NAME})\z/o, 1] }.first
+    end
+
+    def ci_progress(commit)
+      runs = JSON.parse(gh("run", "list", "--workflow", @config.ci_workflow, "--commit", commit, "--event", "push", "--json", "databaseId,status,conclusion"))
+      return {passed: 0, running: 0, failed: 0, total: 0, failing: [], ran: false} if runs.empty?
+
+      Status.tally(JSON.parse(gh("run", "view", runs.first["databaseId"].to_s, "--json", "jobs"))["jobs"]).merge(ran: true)
+    end
+
+    # One call for every open PR, kept to the branches the flow opens.
+    def open_flow_prs
+      prs = JSON.parse(gh("pr", "list", "--state", "open", "--limit", "100", "--json",
+        "number,url,headRefName,headRefOid,baseRefName,mergeable,statusCheckRollup"))
+      prs.filter_map do |pr|
+        kind = flow_kind(pr["headRefName"], pr["baseRefName"]) or next
+        {kind: kind, number: pr["number"], url: pr["url"], branch: pr["headRefName"], head: pr["headRefOid"],
+         mergeable: pr["mergeable"], checks: Status.tally(pr["statusCheckRollup"] || [])}
+      end
+    end
+
+    def flow_kind(branch, base)
+      return :release if base == production && branch.match?(Candidate::BRANCH)
+      return unless base == integration
+
+      {"merge-back/" => :merge_back, "changelog/" => :changelog}.find { |prefix, _| branch.start_with?(prefix) }&.last
+    end
 
     def release_under_way(changelog)
       named = Changelog.named_release(changelog)

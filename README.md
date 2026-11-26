@@ -79,6 +79,25 @@ A setting it doesn't know stops `bin/release` with the list of those it does.
 bin/release prepare   # name the release: gather changelog.d/ into CHANGELOG.md, by PR into next
 bin/release cut       # push release/<name>, which deploys staging, and open its PR into main
 bin/release ship      # merge the reviewed commit, publish v<name>, merge main back into next
+bin/release status    # where the release stands, and the command that comes next
+```
+
+**Where it stands.** `bin/release status` changes nothing. It prints the
+last release shipped, the heads of `main` and `next`, CI on `next`'s head
+with its job counts, and each open merge-back, changelog and release PR with
+its check progress and whether it can merge. It ends on what is waiting on
+what, and the command to run next:
+
+```text
+== Release status in me/app ==
+  shipped: v2026.10.20
+  heads: main at def5678, next at abc1234; main is in next
+  next: v2026.10.27 is named, waiting to be cut
+  CI on next at abc1234: passed, jobs 20/20 passed, 0 running, 0 failed
+  release PR #42 (release/2026.10.27 at abc1234): https://github.com/me/app/pull/42
+    checks 14/20 passed, 6 running, 0 failed; mergeable
+Waiting: release PR #42's checks are still running.
+Next: bin/release ship 42 abc1234 once checks pass and it's reviewed on staging.
 ```
 
 Every command takes `--dry-run`. A release is named for the day,

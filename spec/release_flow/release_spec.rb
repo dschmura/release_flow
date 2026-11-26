@@ -16,6 +16,8 @@ RSpec.describe ReleaseFlow::Release do
   let(:gh_branch_runs) { %q(echo '[{"databaseId":1}]') }
   let(:gh_deploys) { "echo '[]'" }
   let(:gh_release) { "exit 0" }
+  let(:gh_open_prs) { "echo '[]'" }
+  let(:gh_jobs) { %q(echo '{"jobs":[]}') }
   let(:changelog) do
     <<~MD
       # Changelog
@@ -95,6 +97,7 @@ RSpec.describe ReleaseFlow::Release do
       case "$*" in
         "pr create"*) #{gh_create} ;;
         "pr view"*"--jq .url"*) echo "https://github.com/me/app/pull/41" ;;
+        "pr list --state open"*) #{gh_open_prs} ;;
         "pr list"*) #{gh_prs} ;;
         "pr view"*) if [ -f "#{bin}/merged" ]; then cat "#{bin}/merged.json"; else cat "#{bin}/open.json"; fi ;;
         "pr merge"*"--match-head-commit"*) ( #{gh_merge} ); s=$?; [ $s = 0 ] && touch "#{bin}/merged"; exit $s ;;
@@ -103,6 +106,7 @@ RSpec.describe ReleaseFlow::Release do
         "run list --workflow deploy.yml"*) #{gh_deploys} ;;
         "run list"*"--branch next"*) #{gh_branch_runs} ;;
         "run list"*) #{gh_runs} ;;
+        "run view"*) #{gh_jobs} ;;
         *) : ;;
       esac
     SH
@@ -700,6 +704,65 @@ RSpec.describe ReleaseFlow::Release do
 
       expect { run_release("cut", if_needed: true) }
         .to raise_error(ReleaseFlow::Release::Error, %r{can't read the tags of me/private-template})
+    end
+  end
+
+  describe "status" do
+    let(:gh_runs) { %q(echo '[{"databaseId":7,"status":"in_progress","conclusion":""}]') }
+    let(:gh_jobs) do
+      jobs = [{name: "test (1)", status: "completed", conclusion: "success"}, {name: "test (2)", status: "in_progress", conclusion: ""}]
+      "echo '#{JSON.dump(jobs: jobs)}'"
+    end
+
+    before do
+      setup_repo(next_changelog: named)
+      git("push", "-q", "origin", "origin/main:refs/tags/v2026.10.20", "origin/main:refs/tags/v2.0.0")
+    end
+
+    it "reports where the chain stands and the command that comes next, changing nothing" do
+      refs = git("ls-remote", "origin")
+      run_release("status")
+
+      expect(@output).to include("shipped: v2026.10.20")
+        .and include("next: v2026.10.27 is named, waiting to be cut")
+        .and include("CI on next at #{git("rev-parse", "--short=7", "origin/next")}: running, jobs 1/2 passed, 1 running, 0 failed")
+        .and include("Next: bin/release cut once it passes")
+      expect(calls).to include("CALL run view 7 --json jobs")
+      expect(calls).not_to match(/CALL (pr create|pr merge|release create|api -X PUT)/)
+      expect(git("ls-remote", "origin")).to eq(refs)
+    end
+
+    context "with a release PR open" do
+      let(:head) { "abc1234#{"0" * 33}" }
+      let(:gh_open_prs) do
+        prs = [{number: 42, url: "https://github.com/me/app/pull/42", headRefName: "release/2026.10.27", baseRefName: "main",
+                headRefOid: head, mergeable: "MERGEABLE",
+                statusCheckRollup: [{name: "test", status: "COMPLETED", conclusion: "SUCCESS"}, {name: "lint", status: "QUEUED", conclusion: ""}]},
+          {number: 9, url: "https://github.com/me/app/pull/9", headRefName: "feature/x", baseRefName: "next",
+           headRefOid: head, mergeable: "MERGEABLE", statusCheckRollup: []}]
+        "echo '#{JSON.dump(prs)}'"
+      end
+
+      it "lists it with its check progress in one call, leaving out PRs that aren't the flow's" do
+        run_release("status")
+
+        expect(@output).to include("release PR #42 (release/2026.10.27 at abc1234): https://github.com/me/app/pull/42")
+          .and include("checks 1/2 passed, 1 running, 0 failed; mergeable")
+          .and end_with("Next: bin/release ship 42 abc1234 once checks pass and it's reviewed on staging.\n")
+        expect(@output).not_to include("#9")
+        expect(calls.scan("CALL pr list").size).to eq(1)
+      end
+    end
+
+    context "when CI hasn't run on next's head" do
+      let(:gh_runs) { "echo '[]'" }
+
+      it "says so without asking for jobs" do
+        run_release("status")
+
+        expect(@output).to include(": not started")
+        expect(calls).not_to include("run view")
+      end
     end
   end
 

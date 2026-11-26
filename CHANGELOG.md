@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- `bin/release status` shows where the release chain stands, changing nothing: the last release shipped, the `main` and `next` heads, CI on `next` with job counts, each open merge-back, changelog and release PR with its check progress and mergeability, what waits on what, and the command to run next.
 - `cut --if-needed` waits without failing while CI is still running on the commit it would cut, so a CI run finishing on an older commit no longer turns the release workflow red; CI that failed still fails it, and `cut` by hand still refuses.
 - `cut` refuses when `ci_workflow` has never run on the integration branch, naming the setting, instead of waiting on CI that will never report.
 - Under GitHub Actions, a release that waits (`prepare` behind one under way, `cut` behind CI) also shows as a notice on the run and in its step summary.
